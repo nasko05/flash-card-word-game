@@ -124,6 +124,24 @@ button.secondary {
   gap: 1rem;
 }
 
+.mode-switch-panel {
+  margin-top: 1.2rem;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.mode-switch-title {
+  margin: 0;
+  color: #334155;
+  font-weight: 700;
+}
+
+.mode-switch-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
 .word-form {
   margin-top: 1.4rem;
   display: grid;
@@ -191,6 +209,43 @@ button.secondary {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
   gap: 0.8rem;
+}
+
+.mini-game-panel {
+  margin-top: 1.8rem;
+  padding: 1rem;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.mini-game-toolbar {
+  margin-top: 0;
+}
+
+.mini-game-content {
+  margin-top: 0.8rem;
+}
+
+.mini-game-progress {
+  margin: 0 0 0.65rem;
+  color: #475569;
+  font-weight: 700;
+}
+
+.mini-game-card {
+  width: 100%;
+  min-height: 170px;
+  text-align: left;
+}
+
+.mini-game-actions {
+  margin-top: 0.75rem;
+}
+
+.mini-game-empty {
+  margin: 0.8rem 0 0;
+  color: #64748b;
 }
 
 .card {
@@ -290,6 +345,10 @@ code {
   }
 
   .dashboard-header {
+    flex-direction: column;
+  }
+
+  .mode-switch-buttons {
     flex-direction: column;
   }
 

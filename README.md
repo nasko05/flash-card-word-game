@@ -4,6 +4,8 @@ MVP full-stack app for studying Spanish vocabulary with:
 - Cognito authentication (register/login)
 - Upload Spanish words with Bulgarian translations
 - Draw random flash cards (up to 50)
+- Two study modes: Spanish -> Bulgarian and Bulgarian -> Spanish
+- Mini-game mode: draw 20 cards, flip, and go next
 
 ## Stack
 
@@ -106,4 +108,5 @@ Open `http://localhost:5173`.
 - Cognito sign-up requires email confirmation code.
 - `POST /words` upserts by lowercase Spanish word id.
 - Bulk upload is supported via XLSX in the UI (download template, fill rows, upload file).
+- Flashcards and mini-game follow the currently selected study mode direction.
 - Random draw scans table then samples in-memory (fine for MVP scale).

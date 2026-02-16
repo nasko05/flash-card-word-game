@@ -16,6 +16,8 @@ type FlashCard = {
   bulgarian: string;
 };
 
+type StudyMode = "es_to_bg" | "bg_to_es";
+
 type BulkUploadError = {
   row: number;
   message: string;
@@ -28,6 +30,22 @@ type BulkUploadResponse = {
 };
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") || "";
+
+function questionLabel(mode: StudyMode) {
+  return mode === "es_to_bg" ? "Spanish" : "Bulgarian";
+}
+
+function answerLabel(mode: StudyMode) {
+  return mode === "es_to_bg" ? "Bulgarian" : "Spanish";
+}
+
+function questionValue(card: FlashCard, mode: StudyMode) {
+  return mode === "es_to_bg" ? card.spanish : card.bulgarian;
+}
+
+function answerValue(card: FlashCard, mode: StudyMode) {
+  return mode === "es_to_bg" ? card.bulgarian : card.spanish;
+}
 
 function toErrorMessage(error: unknown) {
   if (error instanceof Error) {
@@ -174,11 +192,18 @@ function App() {
   const [cards, setCards] = useState<FlashCard[]>([]);
   const [revealedCards, setRevealedCards] = useState<Record<string, boolean>>({});
   const [drawBusy, setDrawBusy] = useState(false);
+  const [studyMode, setStudyMode] = useState<StudyMode>("es_to_bg");
+
+  const [gameCards, setGameCards] = useState<FlashCard[]>([]);
+  const [gameIndex, setGameIndex] = useState(0);
+  const [gameFlipped, setGameFlipped] = useState(false);
+  const [gameBusy, setGameBusy] = useState(false);
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
 
   const hasConfig = amplifyConfigured && Boolean(API_BASE_URL);
+  const activeGameCard = gameCards[gameIndex] || null;
 
   useEffect(() => {
     let isMounted = true;
@@ -307,6 +332,9 @@ function App() {
       setIsAuthenticated(false);
       setCards([]);
       setRevealedCards({});
+      setGameCards([]);
+      setGameIndex(0);
+      setGameFlipped(false);
       setInfoMessage("Logged out.");
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
@@ -413,6 +441,57 @@ function App() {
     } finally {
       setDrawBusy(false);
     }
+  }
+
+  async function handleStartMiniGame() {
+    resetMessages();
+    setGameBusy(true);
+
+    try {
+      const result = await apiRequest("/words/random?limit=20");
+      const fetchedCards = (result?.items || []) as FlashCard[];
+
+      if (!fetchedCards.length) {
+        setGameCards([]);
+        setInfoMessage("No words available yet. Upload some first.");
+        return;
+      }
+
+      setGameCards(fetchedCards);
+      setGameIndex(0);
+      setGameFlipped(false);
+      setInfoMessage(`Mini-game ready with ${fetchedCards.length} cards.`);
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
+      setGameBusy(false);
+    }
+  }
+
+  function handleFlipGameCard() {
+    if (!activeGameCard) {
+      return;
+    }
+
+    setGameFlipped((current) => !current);
+  }
+
+  function handleNextGameCard() {
+    if (!activeGameCard) {
+      return;
+    }
+
+    if (gameIndex >= gameCards.length - 1) {
+      const reviewedCount = gameCards.length;
+      setGameCards([]);
+      setGameIndex(0);
+      setGameFlipped(false);
+      setInfoMessage(`Mini-game complete. Reviewed ${reviewedCount} words.`);
+      return;
+    }
+
+    setGameIndex((current) => current + 1);
+    setGameFlipped(false);
   }
 
   function toggleCard(cardId: string) {
@@ -540,6 +619,26 @@ function App() {
           </button>
         </header>
 
+        <section className="mode-switch-panel">
+          <p className="mode-switch-title">Study direction</p>
+          <div className="mode-switch-buttons">
+            <button
+              type="button"
+              className={studyMode === "es_to_bg" ? "tab active" : "tab"}
+              onClick={() => setStudyMode("es_to_bg")}
+            >
+              Spanish → Bulgarian
+            </button>
+            <button
+              type="button"
+              className={studyMode === "bg_to_es" ? "tab active" : "tab"}
+              onClick={() => setStudyMode("bg_to_es")}
+            >
+              Bulgarian → Spanish
+            </button>
+          </div>
+        </section>
+
         <form onSubmit={handleWordUpload} className="word-form">
           <label>
             Spanish word
@@ -609,13 +708,60 @@ function App() {
                 onClick={() => toggleCard(card.id)}
                 style={{ animationDelay: `${(index % 10) * 40}ms` }}
               >
-                <span className="card-label">{isRevealed ? "Bulgarian" : "Spanish"}</span>
-                <span className="card-value">{isRevealed ? card.bulgarian : card.spanish}</span>
+                <span className="card-label">
+                  {isRevealed ? answerLabel(studyMode) : questionLabel(studyMode)}
+                </span>
+                <span className="card-value">
+                  {isRevealed ? answerValue(card, studyMode) : questionValue(card, studyMode)}
+                </span>
                 <span className="card-hint">Tap to flip</span>
               </button>
             );
           })}
         </div>
+
+        <section className="mini-game-panel">
+          <div className="cards-toolbar mini-game-toolbar">
+            <h2>Mini-game (20 cards)</h2>
+            <button type="button" onClick={handleStartMiniGame} disabled={gameBusy}>
+              {gameBusy ? "Preparing..." : "Start mini-game"}
+            </button>
+          </div>
+
+          {activeGameCard ? (
+            <div className="mini-game-content">
+              <p className="mini-game-progress">
+                Card {gameIndex + 1} of {gameCards.length}
+              </p>
+
+              <button
+                type="button"
+                className={gameFlipped ? "card revealed mini-game-card" : "card mini-game-card"}
+                onClick={handleFlipGameCard}
+              >
+                <span className="card-label">
+                  {gameFlipped ? answerLabel(studyMode) : questionLabel(studyMode)}
+                </span>
+                <span className="card-value">
+                  {gameFlipped
+                    ? answerValue(activeGameCard, studyMode)
+                    : questionValue(activeGameCard, studyMode)}
+                </span>
+                <span className="card-hint">Tap card to flip</span>
+              </button>
+
+              <div className="mini-game-actions">
+                <button type="button" onClick={handleNextGameCard}>
+                  {gameIndex >= gameCards.length - 1 ? "Finish" : "Next"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p className="mini-game-empty">
+              Start the mini-game to draw 20 random words, flip each card, and move to the next one.
+            </p>
+          )}
+        </section>
 
         {errorMessage ? <p className="message error">{errorMessage}</p> : null}
         {infoMessage ? <p className="message info">{infoMessage}</p> : null}
