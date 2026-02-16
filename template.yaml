@@ -22,6 +22,8 @@ Parameters:
 Resources:
   WordsTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
@@ -50,6 +52,8 @@ Resources:
 
   UserPool:
     Type: AWS::Cognito::UserPool
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       UserPoolName: flash-card-word-game-users
       UsernameAttributes:
@@ -82,6 +86,8 @@ Resources:
 
   FrontendBucket:
     Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
@@ -116,6 +122,8 @@ Resources:
 
   FrontendDistribution:
     Type: AWS::CloudFront::Distribution
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       DistributionConfig:
         Enabled: true
@@ -228,6 +236,33 @@ Resources:
             ApiId: !Ref HttpApi
             Method: GET
             Path: /words/random
+
+  EmptyFrontendBucketFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/functions/
+      Handler: empty_frontend_bucket.lambda_handler
+      Timeout: 120
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:ListBucket
+                - s3:ListBucketVersions
+              Resource:
+                - !GetAtt FrontendBucket.Arn
+            - Effect: Allow
+              Action:
+                - s3:DeleteObject
+                - s3:DeleteObjectVersion
+              Resource:
+                - !Sub "${FrontendBucket.Arn}/*"
+
+  FrontendBucketCleanup:
+    Type: Custom::FrontendBucketCleanup
+    Properties:
+      ServiceToken: !GetAtt EmptyFrontendBucketFunction.Arn
+      BucketName: !Ref FrontendBucket
 
 Outputs:
   ApiBaseUrl:
