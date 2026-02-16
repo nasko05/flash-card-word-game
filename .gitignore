@@ -1,0 +1,14 @@
+.aws-sam/
+.aws/config
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+backend/functions/node_modules/
+**/**/__pycache__/
+*.pyc
+.env
+.env.local
+.DS_Store
