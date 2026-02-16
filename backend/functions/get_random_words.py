@@ -11,6 +11,7 @@ WORDS_TABLE = os.environ.get("WORDS_TABLE")
 RANDOM_INDEX_NAME = "RandomPoolRandKeyIndex"
 MAX_LIMIT = 50
 DEFAULT_LIMIT = 50
+SCAN_PAGE_SIZE = 250
 
 dynamodb = boto3.resource("dynamodb")
 
@@ -52,6 +53,73 @@ def query_index_slice(table, key_condition, limit: int) -> list[dict]:
     return items
 
 
+def read_indexed_random_words(table, limit: int) -> list[dict]:
+    pivot = generate_rand_key()
+
+    primary_slice = query_index_slice(
+        table,
+        Key("randomPool").eq(RANDOM_POOL) & Key("randKey").gte(pivot),
+        limit,
+    )
+
+    if len(primary_slice) < limit:
+        wrap_slice = query_index_slice(
+            table,
+            Key("randomPool").eq(RANDOM_POOL) & Key("randKey").lt(pivot),
+            limit - len(primary_slice),
+        )
+        primary_slice.extend(wrap_slice)
+
+    return primary_slice
+
+
+def fallback_scan_sample(table, limit: int) -> list[dict]:
+    # Reservoir sampling keeps memory bounded while preserving uniformity.
+    reservoir: list[dict] = []
+    seen = 0
+    last_evaluated_key = None
+
+    while True:
+        scan_kwargs = {
+            "ProjectionExpression": "wordId, spanish, bulgarian",
+            "Limit": SCAN_PAGE_SIZE,
+        }
+        if last_evaluated_key:
+            scan_kwargs["ExclusiveStartKey"] = last_evaluated_key
+
+        result = table.scan(**scan_kwargs)
+        for item in result.get("Items", []):
+            seen += 1
+            if len(reservoir) < limit:
+                reservoir.append(item)
+                continue
+
+            replacement_position = random.randint(1, seen)
+            if replacement_position <= limit:
+                reservoir[replacement_position - 1] = item
+
+        last_evaluated_key = result.get("LastEvaluatedKey")
+        if not last_evaluated_key:
+            break
+
+    return reservoir
+
+
+def is_index_unavailable_error(error: ClientError) -> bool:
+    err = error.response.get("Error", {})
+    code = str(err.get("Code", ""))
+    message = str(err.get("Message", "")).lower()
+
+    if code not in {"ValidationException", "ResourceNotFoundException"}:
+        return False
+
+    return (
+        "backfilling global secondary index" in message
+        or "does not have the specified index" in message
+        or RANDOM_INDEX_NAME.lower() in message
+    )
+
+
 
 def lambda_handler(event, _context):
     if not WORDS_TABLE:
@@ -60,23 +128,19 @@ def lambda_handler(event, _context):
     try:
         limit = parse_limit((event.get("queryStringParameters") or {}).get("limit"))
         table = dynamodb.Table(WORDS_TABLE)
-        pivot = generate_rand_key()
 
-        primary_slice = query_index_slice(
-            table,
-            Key("randomPool").eq(RANDOM_POOL) & Key("randKey").gte(pivot),
-            limit,
-        )
+        try:
+            sampled_words = read_indexed_random_words(table, limit)
+        except ClientError as index_error:
+            if not is_index_unavailable_error(index_error):
+                raise
+            print(f"Random index unavailable, falling back to scan sampling: {index_error}")
+            sampled_words = []
 
-        if len(primary_slice) < limit:
-            wrap_slice = query_index_slice(
-                table,
-                Key("randomPool").eq(RANDOM_POOL) & Key("randKey").lt(pivot),
-                limit - len(primary_slice),
-            )
-            primary_slice.extend(wrap_slice)
+        if not sampled_words:
+            sampled_words = fallback_scan_sample(table, limit)
 
-        if not primary_slice:
+        if not sampled_words:
             return json_response(
                 200,
                 {
@@ -85,8 +149,8 @@ def lambda_handler(event, _context):
                 },
             )
 
-        random.shuffle(primary_slice)
-        sampled_words = primary_slice[:limit]
+        random.shuffle(sampled_words)
+        sampled_words = sampled_words[:limit]
 
         return json_response(
             200,
