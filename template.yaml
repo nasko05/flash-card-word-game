@@ -27,9 +27,26 @@ Resources:
       AttributeDefinitions:
         - AttributeName: wordId
           AttributeType: S
+        - AttributeName: randomPool
+          AttributeType: S
+        - AttributeName: randKey
+          AttributeType: N
       KeySchema:
         - AttributeName: wordId
           KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: RandomPoolRandKeyIndex
+          KeySchema:
+            - AttributeName: randomPool
+              KeyType: HASH
+            - AttributeName: randKey
+              KeyType: RANGE
+          Projection:
+            ProjectionType: INCLUDE
+            NonKeyAttributes:
+              - wordId
+              - spanish
+              - bulgarian
 
   UserPool:
     Type: AWS::Cognito::UserPool
@@ -198,6 +215,12 @@ Resources:
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref WordsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - !Sub "${WordsTable.Arn}/index/RandomPoolRandKeyIndex"
       Events:
         RandomWords:
           Type: HttpApi

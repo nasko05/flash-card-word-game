@@ -14,7 +14,7 @@ MVP full-stack app for studying Spanish vocabulary with:
 - Auth: Amazon Cognito User Pool
 - API: API Gateway HTTP API (JWT auth with Cognito)
 - Backend: AWS Lambda in Python (`backend/functions/`)
-- Data: DynamoDB (`wordId` partition key)
+- Data: DynamoDB (`wordId` partition key + `RandomPoolRandKeyIndex` GSI for random draws)
 - IaC: AWS SAM (`template.yaml`)
 
 ## Region
@@ -109,4 +109,4 @@ Open `http://localhost:5173`.
 - `POST /words` upserts by lowercase Spanish word id.
 - Bulk upload is supported via XLSX in the UI (download template, fill rows, upload file).
 - Flashcards and mini-game follow the currently selected study mode direction.
-- Random draw scans table then samples in-memory (fine for MVP scale).
+- Random draw uses indexed query by `randKey` and does not scan the full table in normal operation.

@@ -1,5 +1,10 @@
 import json
+import random
 from typing import Any, Dict
+
+RANDOM_POOL = "global"
+RAND_KEY_MIN = 1
+RAND_KEY_MAX = 1_000_000_000
 
 
 def json_response(status_code: int, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -38,3 +43,7 @@ def read_user_claims(event: Dict[str, Any]) -> Dict[str, Any]:
         .get("jwt", {})
         .get("claims", {})
     )
+
+
+def generate_rand_key() -> int:
+    return random.randint(RAND_KEY_MIN, RAND_KEY_MAX)

@@ -115,6 +115,7 @@ ensure_aws_session() {
 
 require_command aws "brew install awscli"
 require_command sam "brew install aws-sam-cli"
+require_command python3 "https://python.org/"
 
 if [[ "${SKIP_FRONTEND_DEPLOY}" != "true" ]]; then
   require_command npm "https://nodejs.org/"

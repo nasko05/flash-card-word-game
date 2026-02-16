@@ -1,11 +1,19 @@
 import datetime
 import os
+from decimal import Decimal
 from typing import Any
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
-from common import json_response, parse_json_body, read_user_claims, to_clean_string
+from common import (
+    RANDOM_POOL,
+    generate_rand_key,
+    json_response,
+    parse_json_body,
+    read_user_claims,
+    to_clean_string,
+)
 
 WORDS_TABLE = os.environ.get("WORDS_TABLE")
 MAX_BULK_ITEMS = 1000
@@ -29,6 +37,29 @@ def parse_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return items
 
 
+def parse_rand_key(value: Any) -> int | None:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, Decimal):
+        return int(value)
+    return None
+
+
+def resolve_random_attributes(table, word_id: str) -> tuple[str, int]:
+    existing = table.get_item(
+        Key={"wordId": word_id},
+        ProjectionExpression="randomPool, randKey",
+    ).get("Item", {})
+
+    existing_pool = existing.get("randomPool")
+    existing_rand_key = parse_rand_key(existing.get("randKey"))
+
+    if isinstance(existing_pool, str) and existing_rand_key is not None:
+        return existing_pool, existing_rand_key
+
+    return RANDOM_POOL, generate_rand_key()
+
+
 def lambda_handler(event, _context):
     if not WORDS_TABLE:
         return json_response(500, {"message": "WORDS_TABLE environment variable is missing."})
@@ -40,7 +71,7 @@ def lambda_handler(event, _context):
         actor = claims.get("sub", "unknown")
         timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
-        valid_by_word_id: dict[str, dict[str, str]] = {}
+        valid_by_word_id: dict[str, dict[str, Any]] = {}
         validation_errors: list[dict[str, Any]] = []
 
         for index, raw_item in enumerate(raw_items, start=1):
@@ -80,7 +111,7 @@ def lambda_handler(event, _context):
                 "spanish": spanish,
                 "bulgarian": bulgarian,
                 "updatedAt": timestamp,
-                "createdBy": actor
+                "createdBy": actor,
             }
 
         valid_items = list(valid_by_word_id.values())
@@ -100,7 +131,14 @@ def lambda_handler(event, _context):
         table = dynamodb.Table(WORDS_TABLE)
         with table.batch_writer(overwrite_by_pkeys=["wordId"]) as batch:
             for item in valid_items:
-                batch.put_item(Item=item)
+                random_pool, rand_key = resolve_random_attributes(table, item["wordId"])
+                batch.put_item(
+                    Item={
+                        **item,
+                        "randomPool": random_pool,
+                        "randKey": rand_key,
+                    }
+                )
 
         return json_response(
             201,

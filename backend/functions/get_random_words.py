@@ -2,14 +2,15 @@ import os
 import random
 
 import boto3
+from boto3.dynamodb.conditions import Key
 from botocore.exceptions import BotoCoreError, ClientError
 
-from common import json_response
+from common import RANDOM_POOL, generate_rand_key, json_response
 
 WORDS_TABLE = os.environ.get("WORDS_TABLE")
+RANDOM_INDEX_NAME = "RandomPoolRandKeyIndex"
 MAX_LIMIT = 50
 DEFAULT_LIMIT = 50
-SCAN_PAGE_SIZE = 250
 
 dynamodb = boto3.resource("dynamodb")
 
@@ -26,19 +27,22 @@ def parse_limit(raw_limit: str | None) -> int:
     return max(1, min(parsed, MAX_LIMIT))
 
 
-def read_all_words(table) -> list[dict]:
+
+def query_index_slice(table, key_condition, limit: int) -> list[dict]:
     items: list[dict] = []
     last_evaluated_key = None
 
-    while True:
-        scan_kwargs = {
-            "ProjectionExpression": "wordId, spanish, bulgarian",
-            "Limit": SCAN_PAGE_SIZE
+    while len(items) < limit:
+        query_kwargs = {
+            "IndexName": RANDOM_INDEX_NAME,
+            "KeyConditionExpression": key_condition,
+            "Limit": limit - len(items),
+            "ScanIndexForward": True,
         }
         if last_evaluated_key:
-            scan_kwargs["ExclusiveStartKey"] = last_evaluated_key
+            query_kwargs["ExclusiveStartKey"] = last_evaluated_key
 
-        result = table.scan(**scan_kwargs)
+        result = table.query(**query_kwargs)
         items.extend(result.get("Items", []))
         last_evaluated_key = result.get("LastEvaluatedKey")
 
@@ -56,27 +60,47 @@ def lambda_handler(event, _context):
     try:
         limit = parse_limit((event.get("queryStringParameters") or {}).get("limit"))
         table = dynamodb.Table(WORDS_TABLE)
-        words = read_all_words(table)
+        pivot = generate_rand_key()
 
-        if not words:
-            return json_response(200, {"count": 0, "items": []})
+        primary_slice = query_index_slice(
+            table,
+            Key("randomPool").eq(RANDOM_POOL) & Key("randKey").gte(pivot),
+            limit,
+        )
 
-        sample_size = min(limit, len(words))
-        sampled_words = random.sample(words, sample_size)
+        if len(primary_slice) < limit:
+            wrap_slice = query_index_slice(
+                table,
+                Key("randomPool").eq(RANDOM_POOL) & Key("randKey").lt(pivot),
+                limit - len(primary_slice),
+            )
+            primary_slice.extend(wrap_slice)
+
+        if not primary_slice:
+            return json_response(
+                200,
+                {
+                    "count": 0,
+                    "items": [],
+                },
+            )
+
+        random.shuffle(primary_slice)
+        sampled_words = primary_slice[:limit]
 
         return json_response(
             200,
             {
-                "count": sample_size,
+                "count": len(sampled_words),
                 "items": [
                     {
                         "id": item.get("wordId"),
                         "spanish": item.get("spanish"),
-                        "bulgarian": item.get("bulgarian")
+                        "bulgarian": item.get("bulgarian"),
                     }
                     for item in sampled_words
-                ]
-            }
+                ],
+            },
         )
     except (ClientError, BotoCoreError) as exc:
         print(f"Failed to fetch random words: {exc}")

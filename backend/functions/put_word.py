@@ -4,7 +4,14 @@ import os
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
-from common import json_response, parse_json_body, read_user_claims, to_clean_string
+from common import (
+    RANDOM_POOL,
+    generate_rand_key,
+    json_response,
+    parse_json_body,
+    read_user_claims,
+    to_clean_string,
+)
 
 WORDS_TABLE = os.environ.get("WORDS_TABLE")
 dynamodb = boto3.resource("dynamodb")
@@ -36,14 +43,21 @@ def lambda_handler(event, _context):
         table = dynamodb.Table(WORDS_TABLE)
         word_id = spanish.lower()
 
-        table.put_item(
-            Item={
-                "wordId": word_id,
-                "spanish": spanish,
-                "bulgarian": bulgarian,
-                "updatedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                "createdBy": claims.get("sub", "unknown")
-            }
+        table.update_item(
+            Key={"wordId": word_id},
+            UpdateExpression=(
+                "SET spanish = :spanish, bulgarian = :bulgarian, updatedAt = :updated_at, "
+                "createdBy = :created_by, randomPool = if_not_exists(randomPool, :random_pool), "
+                "randKey = if_not_exists(randKey, :rand_key)"
+            ),
+            ExpressionAttributeValues={
+                ":spanish": spanish,
+                ":bulgarian": bulgarian,
+                ":updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                ":created_by": claims.get("sub", "unknown"),
+                ":random_pool": RANDOM_POOL,
+                ":rand_key": generate_rand_key(),
+            },
         )
 
         return json_response(
