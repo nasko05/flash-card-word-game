@@ -34,6 +34,11 @@ type BulkUploadResponse = {
   errors?: BulkUploadError[];
 };
 
+type ExportWordsResponse = {
+  count: number;
+  items: FlashCard[];
+};
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") || "";
 const FLASHCARD_MODE: StudyMode = "es_to_bg";
 const COMBINING_MARK_REGEX = /[\u0300-\u036f]/;
@@ -273,6 +278,7 @@ function App() {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkFileName, setBulkFileName] = useState("");
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
+  const [downloadBusy, setDownloadBusy] = useState(false);
 
   const [cards, setCards] = useState<FlashCard[]>([]);
   const [revealedCards, setRevealedCards] = useState<Record<string, boolean>>({});
@@ -558,12 +564,43 @@ function App() {
     XLSX.writeFile(workbook, "spanish-bulgarian-template.xlsx");
   }
 
+  async function handleDownloadWords() {
+    resetMessages();
+    setDownloadBusy(true);
+
+    try {
+      const result = (await apiRequest("/words/export")) as ExportWordsResponse;
+      const items = result?.items || [];
+
+      if (!items.length) {
+        setInfoMessage("No words available yet for export.");
+        return;
+      }
+
+      const XLSX = await import("xlsx");
+      const workbook = XLSX.utils.book_new();
+      const worksheet = XLSX.utils.aoa_to_sheet([
+        ["spanish", "bulgarian"],
+        ...items.map((item) => [item.spanish, item.bulgarian])
+      ]);
+      const dateStamp = new Date().toISOString().slice(0, 10);
+
+      XLSX.utils.book_append_sheet(workbook, worksheet, "words");
+      XLSX.writeFile(workbook, `spanish-bulgarian-export-${dateStamp}.xlsx`);
+      setInfoMessage(`Downloaded ${items.length} words.`);
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
+      setDownloadBusy(false);
+    }
+  }
+
   async function handleDrawCards() {
     resetMessages();
     setDrawBusy(true);
 
     try {
-      const result = await apiRequest("/words/random?limit=50");
+      const result = await apiRequest("/words/random?limit=20");
       const fetchedCards = (result?.items || []) as FlashCard[];
 
       setCards(fetchedCards);
@@ -832,9 +869,9 @@ function App() {
       <section className="panel dashboard-panel">
         <header className="dashboard-header">
           <div>
-            <h1>Spanish → Bulgarian Flash Cards</h1>
+            <h1>Spanish Practice</h1>
             <p className="panel-subtitle">
-              Add vocabulary and switch between flash cards and two quiz directions.
+              Add vocabulary and practice with flash cards and two quiz directions.
             </p>
           </div>
           <button type="button" onClick={handleSignOut} className="secondary">
@@ -873,6 +910,9 @@ function App() {
           <button type="button" onClick={openUploadDialog}>
             Upload words
           </button>
+          <button type="button" className="secondary" onClick={handleDownloadWords} disabled={downloadBusy}>
+            {downloadBusy ? "Preparing..." : "Download words"}
+          </button>
         </div>
 
         {practiceMode === "flashcards" ? (
@@ -880,7 +920,7 @@ function App() {
             <div className="cards-toolbar">
               <h2>Flash cards</h2>
               <button type="button" onClick={handleDrawCards} disabled={drawBusy}>
-                {drawBusy ? "Drawing..." : "Draw random 50"}
+                {drawBusy ? "Drawing..." : "Draw random 20"}
               </button>
             </div>
 

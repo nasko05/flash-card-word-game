@@ -241,6 +241,22 @@ Resources:
             Method: GET
             Path: /words/random
 
+  GetUserWordsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/functions/
+      Handler: get_user_words.lambda_handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref WordsTable
+      Events:
+        ExportWords:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: GET
+            Path: /words/export
+
   EmptyFrontendBucketFunction:
     Type: AWS::Serverless::Function
     Properties:

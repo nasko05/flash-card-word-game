@@ -144,6 +144,13 @@ button.secondary {
 
 .upload-dialog-trigger {
   margin-top: 1.2rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+}
+
+.upload-dialog-trigger button {
+  min-width: 180px;
 }
 
 .word-form {
@@ -479,6 +486,7 @@ code {
 
   .upload-dialog-trigger button {
     width: 100%;
+    min-width: 0;
   }
 
   .upload-dialog-backdrop {

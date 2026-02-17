@@ -103,14 +103,17 @@ Open `http://localhost:5173`.
   - body: `{ "spanish": "aprender", "bulgarian": "уча" }`
 - `POST /words/bulk`
   - body: `{ "items": [{ "spanish": "aprender", "bulgarian": "уча" }] }`
-- `GET /words/random?limit=50`
+- `GET /words/random?limit=20`
   - returns random set from DynamoDB
+- `GET /words/export`
+  - returns all authenticated user words for XLSX export/bulk editing
 
 ## Notes
 
 - Cognito sign-up requires email confirmation code.
 - `POST /words` upserts by lowercase Spanish word id within the authenticated user scope.
 - Bulk upload is supported via XLSX in the UI (download template, fill rows, upload file).
+- You can export all words for the authenticated user as XLSX, edit them, and upload back in bulk.
 - Quiz answer checks are case-insensitive; near-miss answers (accent/case only) are counted as correct with a warning and the canonical word shown.
 - Quiz mode `Bulgarian -> Spanish` ignores `e`/`i` accents when checking typed Spanish answers while keeping `ñ` strict.
 - Random draw is user-scoped and uses indexed query by `randKey` in normal operation.
