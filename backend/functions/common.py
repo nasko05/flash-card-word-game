@@ -2,7 +2,6 @@ import json
 import random
 from typing import Any, Dict
 
-RANDOM_POOL = "global"
 RAND_KEY_MIN = 1
 RAND_KEY_MAX = 1_000_000_000
 
@@ -43,6 +42,12 @@ def read_user_claims(event: Dict[str, Any]) -> Dict[str, Any]:
         .get("jwt", {})
         .get("claims", {})
     )
+
+
+def read_user_id(event: Dict[str, Any]) -> str:
+    claims = read_user_claims(event)
+    user_id = claims.get("sub")
+    return user_id.strip() if isinstance(user_id, str) else ""
 
 
 def generate_rand_key() -> int:

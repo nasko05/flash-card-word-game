@@ -5,7 +5,7 @@ import boto3
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import BotoCoreError, ClientError
 
-from common import RANDOM_POOL, generate_rand_key, json_response
+from common import generate_rand_key, json_response, read_user_id
 
 WORDS_TABLE = os.environ.get("WORDS_TABLE")
 RANDOM_INDEX_NAME = "RandomPoolRandKeyIndex"
@@ -53,19 +53,19 @@ def query_index_slice(table, key_condition, limit: int) -> list[dict]:
     return items
 
 
-def read_indexed_random_words(table, limit: int) -> list[dict]:
+def read_indexed_random_words(table, user_id: str, limit: int) -> list[dict]:
     pivot = generate_rand_key()
 
     primary_slice = query_index_slice(
         table,
-        Key("randomPool").eq(RANDOM_POOL) & Key("randKey").gte(pivot),
+        Key("randomPool").eq(user_id) & Key("randKey").gte(pivot),
         limit,
     )
 
     if len(primary_slice) < limit:
         wrap_slice = query_index_slice(
             table,
-            Key("randomPool").eq(RANDOM_POOL) & Key("randKey").lt(pivot),
+            Key("randomPool").eq(user_id) & Key("randKey").lt(pivot),
             limit - len(primary_slice),
         )
         primary_slice.extend(wrap_slice)
@@ -73,21 +73,22 @@ def read_indexed_random_words(table, limit: int) -> list[dict]:
     return primary_slice
 
 
-def fallback_scan_sample(table, limit: int) -> list[dict]:
+def fallback_user_partition_sample(table, user_id: str, limit: int) -> list[dict]:
     # Reservoir sampling keeps memory bounded while preserving uniformity.
     reservoir: list[dict] = []
     seen = 0
     last_evaluated_key = None
 
     while True:
-        scan_kwargs = {
+        query_kwargs = {
+            "KeyConditionExpression": Key("userId").eq(user_id),
             "ProjectionExpression": "wordId, spanish, bulgarian",
             "Limit": SCAN_PAGE_SIZE,
         }
         if last_evaluated_key:
-            scan_kwargs["ExclusiveStartKey"] = last_evaluated_key
+            query_kwargs["ExclusiveStartKey"] = last_evaluated_key
 
-        result = table.scan(**scan_kwargs)
+        result = table.query(**query_kwargs)
         for item in result.get("Items", []):
             seen += 1
             if len(reservoir) < limit:
@@ -127,10 +128,14 @@ def lambda_handler(event, _context):
 
     try:
         limit = parse_limit((event.get("queryStringParameters") or {}).get("limit"))
+        user_id = read_user_id(event)
+        if not user_id:
+            return json_response(401, {"message": "Unauthorized."})
+
         table = dynamodb.Table(WORDS_TABLE)
 
         try:
-            sampled_words = read_indexed_random_words(table, limit)
+            sampled_words = read_indexed_random_words(table, user_id, limit)
         except ClientError as index_error:
             if not is_index_unavailable_error(index_error):
                 raise
@@ -138,7 +143,7 @@ def lambda_handler(event, _context):
             sampled_words = []
 
         if not sampled_words:
-            sampled_words = fallback_scan_sample(table, limit)
+            sampled_words = fallback_user_partition_sample(table, user_id, limit)
 
         if not sampled_words:
             return json_response(

@@ -3,9 +3,12 @@
 MVP full-stack app for studying Spanish vocabulary with:
 - Cognito authentication (register/login)
 - Upload Spanish words with Bulgarian translations
-- Draw random flash cards (up to 50)
-- Two study modes: Spanish -> Bulgarian and Bulgarian -> Spanish
-- Mini-game mode: draw 20 cards, flip, and go next
+- Three practice modes:
+  - flash cards (normal flip cards)
+  - quiz Bulgarian -> Spanish
+  - quiz Spanish -> Bulgarian
+- Spanish quiz answers ignore accents on `e`/`i` but still require correct `ñ`
+- Mini-game mode (within flash cards): draw 20 cards, flip, and go next
 
 ## Stack
 
@@ -14,7 +17,7 @@ MVP full-stack app for studying Spanish vocabulary with:
 - Auth: Amazon Cognito User Pool
 - API: API Gateway HTTP API (JWT auth with Cognito)
 - Backend: AWS Lambda in Python (`backend/functions/`)
-- Data: DynamoDB (`wordId` partition key + `RandomPoolRandKeyIndex` GSI for random draws)
+- Data: DynamoDB (`userId` + `wordId` primary key, plus `RandomPoolRandKeyIndex` GSI for random draws)
 - IaC: AWS SAM (`template.yaml`)
 
 ## Region
@@ -106,7 +109,8 @@ Open `http://localhost:5173`.
 ## Notes
 
 - Cognito sign-up requires email confirmation code.
-- `POST /words` upserts by lowercase Spanish word id.
+- `POST /words` upserts by lowercase Spanish word id within the authenticated user scope.
 - Bulk upload is supported via XLSX in the UI (download template, fill rows, upload file).
-- Flashcards and mini-game follow the currently selected study mode direction.
-- Random draw uses indexed query by `randKey` and does not scan the full table in normal operation.
+- Quiz answer checks are case-insensitive; near-miss answers (accent/case only) are counted as correct with a warning and the canonical word shown.
+- Quiz mode `Bulgarian -> Spanish` ignores `e`/`i` accents when checking typed Spanish answers while keeping `ñ` strict.
+- Random draw is user-scoped and uses indexed query by `randKey` in normal operation.

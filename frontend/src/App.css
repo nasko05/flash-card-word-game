@@ -142,6 +142,10 @@ button.secondary {
   gap: 0.55rem;
 }
 
+.upload-dialog-trigger {
+  margin-top: 1.2rem;
+}
+
 .word-form {
   margin-top: 1.4rem;
   display: grid;
@@ -188,6 +192,47 @@ button.secondary {
   margin: 0;
   color: #0f766e;
   font-weight: 600;
+}
+
+.upload-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  padding: 1.2rem;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.upload-dialog {
+  width: min(980px, 100%);
+  max-height: calc(100vh - 2.4rem);
+  overflow-y: auto;
+  background: rgba(255, 251, 245, 0.98);
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 18px;
+  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.24);
+  padding: 1rem;
+}
+
+.upload-dialog-header {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.upload-dialog-close {
+  border-radius: 999px;
+}
+
+.upload-dialog h2 {
+  margin: 0.6rem 0 0;
+  font-family: "Fraunces", serif;
+  color: #0f172a;
+}
+
+.upload-dialog .word-form {
+  margin-top: 1rem;
 }
 
 .cards-toolbar {
@@ -244,6 +289,77 @@ button.secondary {
 }
 
 .mini-game-empty {
+  margin: 0.8rem 0 0;
+  color: #64748b;
+}
+
+.quiz-panel {
+  margin-top: 1.8rem;
+  padding: 1rem;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.quiz-toolbar {
+  margin-top: 0;
+}
+
+.quiz-content {
+  margin-top: 0.8rem;
+}
+
+.quiz-prompt-label {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+
+.quiz-prompt-value {
+  margin: 0.35rem 0 0.8rem;
+  font-family: "Fraunces", serif;
+  font-size: clamp(1.2rem, 2vw, 1.5rem);
+  color: #111827;
+}
+
+.quiz-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.quiz-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.quiz-result {
+  margin: 0.75rem 0 0;
+  font-weight: 700;
+}
+
+.quiz-result.correct {
+  color: #0f766e;
+}
+
+.quiz-result.warning {
+  color: #b45309;
+}
+
+.quiz-result.wrong {
+  color: #9f1239;
+}
+
+.quiz-score {
+  margin: 0.5rem 0 0;
+  color: #334155;
+  font-weight: 700;
+}
+
+.quiz-empty {
   margin: 0.8rem 0 0;
   color: #64748b;
 }
@@ -359,5 +475,19 @@ code {
 
   .cards-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .upload-dialog-trigger button {
+    width: 100%;
+  }
+
+  .upload-dialog-backdrop {
+    padding: 0.6rem;
+  }
+
+  .upload-dialog {
+    max-height: calc(100vh - 1.2rem);
+    border-radius: 14px;
+    padding: 0.9rem;
   }
 }

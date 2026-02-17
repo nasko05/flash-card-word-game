@@ -7,11 +7,10 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
 from common import (
-    RANDOM_POOL,
     generate_rand_key,
     json_response,
     parse_json_body,
-    read_user_claims,
+    read_user_id,
     to_clean_string,
 )
 
@@ -45,9 +44,9 @@ def parse_rand_key(value: Any) -> int | None:
     return None
 
 
-def resolve_random_attributes(table, word_id: str) -> tuple[str, int]:
+def resolve_random_attributes(table, user_id: str, word_id: str) -> tuple[str, int]:
     existing = table.get_item(
-        Key={"wordId": word_id},
+        Key={"userId": user_id, "wordId": word_id},
         ProjectionExpression="randomPool, randKey",
     ).get("Item", {})
 
@@ -57,7 +56,7 @@ def resolve_random_attributes(table, word_id: str) -> tuple[str, int]:
     if isinstance(existing_pool, str) and existing_rand_key is not None:
         return existing_pool, existing_rand_key
 
-    return RANDOM_POOL, generate_rand_key()
+    return user_id, generate_rand_key()
 
 
 def lambda_handler(event, _context):
@@ -67,8 +66,11 @@ def lambda_handler(event, _context):
     try:
         payload = parse_json_body(event.get("body"))
         raw_items = parse_items(payload)
-        claims = read_user_claims(event)
-        actor = claims.get("sub", "unknown")
+        user_id = read_user_id(event)
+        if not user_id:
+            return json_response(401, {"message": "Unauthorized."})
+
+        actor = user_id
         timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
         valid_by_word_id: dict[str, dict[str, Any]] = {}
@@ -107,6 +109,7 @@ def lambda_handler(event, _context):
 
             word_id = spanish.lower()
             valid_by_word_id[word_id] = {
+                "userId": user_id,
                 "wordId": word_id,
                 "spanish": spanish,
                 "bulgarian": bulgarian,
@@ -129,9 +132,9 @@ def lambda_handler(event, _context):
             )
 
         table = dynamodb.Table(WORDS_TABLE)
-        with table.batch_writer(overwrite_by_pkeys=["wordId"]) as batch:
+        with table.batch_writer(overwrite_by_pkeys=["userId", "wordId"]) as batch:
             for item in valid_items:
-                random_pool, rand_key = resolve_random_attributes(table, item["wordId"])
+                random_pool, rand_key = resolve_random_attributes(table, user_id, item["wordId"])
                 batch.put_item(
                     Item={
                         **item,

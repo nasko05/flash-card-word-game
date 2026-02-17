@@ -17,6 +17,11 @@ type FlashCard = {
 };
 
 type StudyMode = "es_to_bg" | "bg_to_es";
+type PracticeMode = "flashcards" | "quiz_bg_to_es" | "quiz_es_to_bg";
+type QuizResult = {
+  status: "exact" | "warning" | "wrong";
+  expected: string;
+};
 
 type BulkUploadError = {
   row: number;
@@ -30,6 +35,8 @@ type BulkUploadResponse = {
 };
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") || "";
+const FLASHCARD_MODE: StudyMode = "es_to_bg";
+const COMBINING_MARK_REGEX = /[\u0300-\u036f]/;
 
 function questionLabel(mode: StudyMode) {
   return mode === "es_to_bg" ? "Spanish" : "Bulgarian";
@@ -45,6 +52,83 @@ function questionValue(card: FlashCard, mode: StudyMode) {
 
 function answerValue(card: FlashCard, mode: StudyMode) {
   return mode === "es_to_bg" ? card.bulgarian : card.spanish;
+}
+
+function quizPromptLabel(mode: PracticeMode) {
+  return mode === "quiz_bg_to_es" ? "Bulgarian word" : "Spanish word";
+}
+
+function quizExpectedLabel(mode: PracticeMode) {
+  return mode === "quiz_bg_to_es" ? "Spanish answer" : "Bulgarian answer";
+}
+
+function quizPromptValue(card: FlashCard, mode: PracticeMode) {
+  return mode === "quiz_bg_to_es" ? card.bulgarian : card.spanish;
+}
+
+function quizExpectedValue(card: FlashCard, mode: PracticeMode) {
+  return mode === "quiz_bg_to_es" ? card.spanish : card.bulgarian;
+}
+
+function normalizeWhitespaceKeepingCase(value: string) {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function normalizeWhitespace(value: string) {
+  return normalizeWhitespaceKeepingCase(value).toLowerCase();
+}
+
+function normalizeSpanishQuizAnswer(value: string) {
+  const normalized = normalizeWhitespace(value).normalize("NFD");
+  let rebuilt = "";
+  let previousBaseChar = "";
+
+  for (const char of normalized) {
+    if (COMBINING_MARK_REGEX.test(char)) {
+      if (previousBaseChar === "e" || previousBaseChar === "i") {
+        continue;
+      }
+
+      rebuilt += char;
+      continue;
+    }
+
+    rebuilt += char;
+    previousBaseChar = char;
+  }
+
+  return rebuilt.normalize("NFC");
+}
+
+function evaluateQuizAnswer(mode: PracticeMode, provided: string, expected: string) {
+  if (mode === "quiz_bg_to_es") {
+    const providedComparable = normalizeSpanishQuizAnswer(provided);
+    const expectedComparable = normalizeSpanishQuizAnswer(expected);
+
+    if (providedComparable !== expectedComparable) {
+      return { isCorrect: false, warning: false };
+    }
+
+    const providedStrict = normalizeWhitespaceKeepingCase(provided).normalize("NFC");
+    const expectedStrict = normalizeWhitespaceKeepingCase(expected).normalize("NFC");
+
+    return {
+      isCorrect: true,
+      warning: providedStrict !== expectedStrict
+    };
+  }
+
+  const providedComparable = normalizeWhitespace(provided);
+  const expectedComparable = normalizeWhitespace(expected);
+
+  if (providedComparable !== expectedComparable) {
+    return { isCorrect: false, warning: false };
+  }
+
+  return {
+    isCorrect: true,
+    warning: normalizeWhitespaceKeepingCase(provided) !== normalizeWhitespaceKeepingCase(expected)
+  };
 }
 
 function toErrorMessage(error: unknown) {
@@ -188,22 +272,32 @@ function App() {
   const [wordBusy, setWordBusy] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkFileName, setBulkFileName] = useState("");
+  const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
 
   const [cards, setCards] = useState<FlashCard[]>([]);
   const [revealedCards, setRevealedCards] = useState<Record<string, boolean>>({});
   const [drawBusy, setDrawBusy] = useState(false);
-  const [studyMode, setStudyMode] = useState<StudyMode>("es_to_bg");
+  const [practiceMode, setPracticeMode] = useState<PracticeMode>("flashcards");
 
   const [gameCards, setGameCards] = useState<FlashCard[]>([]);
   const [gameIndex, setGameIndex] = useState(0);
   const [gameFlipped, setGameFlipped] = useState(false);
   const [gameBusy, setGameBusy] = useState(false);
 
+  const [quizCards, setQuizCards] = useState<FlashCard[]>([]);
+  const [quizIndex, setQuizIndex] = useState(0);
+  const [quizInput, setQuizInput] = useState("");
+  const [quizResult, setQuizResult] = useState<QuizResult | null>(null);
+  const [quizCorrectCount, setQuizCorrectCount] = useState(0);
+  const [quizAnsweredCount, setQuizAnsweredCount] = useState(0);
+  const [quizBusy, setQuizBusy] = useState(false);
+
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
 
   const hasConfig = amplifyConfigured && Boolean(API_BASE_URL);
   const activeGameCard = gameCards[gameIndex] || null;
+  const activeQuizCard = quizCards[quizIndex] || null;
 
   useEffect(() => {
     let isMounted = true;
@@ -239,9 +333,49 @@ function App() {
     };
   }, [hasConfig]);
 
+  useEffect(() => {
+    if (!isUploadDialogOpen) {
+      return undefined;
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsUploadDialogOpen(false);
+      }
+    }
+
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [isUploadDialogOpen]);
+
   function resetMessages() {
     setErrorMessage(null);
     setInfoMessage(null);
+  }
+
+  function openUploadDialog() {
+    setIsUploadDialogOpen(true);
+  }
+
+  function closeUploadDialog() {
+    setIsUploadDialogOpen(false);
+  }
+
+  function resetQuizState() {
+    setQuizCards([]);
+    setQuizIndex(0);
+    setQuizInput("");
+    setQuizResult(null);
+    setQuizCorrectCount(0);
+    setQuizAnsweredCount(0);
+  }
+
+  function handlePracticeModeChange(mode: PracticeMode) {
+    resetMessages();
+    setPracticeMode(mode);
+    resetQuizState();
   }
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
@@ -330,11 +464,14 @@ function App() {
     try {
       await signOut();
       setIsAuthenticated(false);
+      setIsUploadDialogOpen(false);
       setCards([]);
       setRevealedCards({});
       setGameCards([]);
       setGameIndex(0);
       setGameFlipped(false);
+      setPracticeMode("flashcards");
+      resetQuizState();
       setInfoMessage("Logged out.");
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
@@ -466,6 +603,92 @@ function App() {
     } finally {
       setGameBusy(false);
     }
+  }
+
+  async function handleStartQuiz() {
+    if (practiceMode === "flashcards") {
+      return;
+    }
+
+    resetMessages();
+    setQuizBusy(true);
+
+    try {
+      const result = await apiRequest("/words/random?limit=20");
+      const fetchedCards = (result?.items || []) as FlashCard[];
+
+      if (!fetchedCards.length) {
+        resetQuizState();
+        setInfoMessage("No words available yet. Upload some first.");
+        return;
+      }
+
+      setQuizCards(fetchedCards);
+      setQuizIndex(0);
+      setQuizInput("");
+      setQuizResult(null);
+      setQuizCorrectCount(0);
+      setQuizAnsweredCount(0);
+      setInfoMessage(`Quiz ready with ${fetchedCards.length} words.`);
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
+      setQuizBusy(false);
+    }
+  }
+
+  function handleSubmitQuizAnswer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    resetMessages();
+
+    if (!activeQuizCard || quizResult || practiceMode === "flashcards") {
+      return;
+    }
+
+    const providedAnswer = quizInput.trim();
+    if (!providedAnswer) {
+      setErrorMessage("Enter an answer before checking.");
+      return;
+    }
+
+    const expectedAnswer = quizExpectedValue(activeQuizCard, practiceMode);
+    const evaluation = evaluateQuizAnswer(practiceMode, providedAnswer, expectedAnswer);
+    setQuizAnsweredCount((current) => current + 1);
+
+    if (evaluation.isCorrect) {
+      setQuizCorrectCount((current) => current + 1);
+      if (evaluation.warning) {
+        setQuizResult({ status: "warning", expected: expectedAnswer });
+        setInfoMessage("Correct, but be careful with accent or case.");
+        return;
+      }
+
+      setQuizResult({ status: "exact", expected: expectedAnswer });
+      setInfoMessage("Correct.");
+      return;
+    }
+
+    setQuizResult({ status: "wrong", expected: expectedAnswer });
+    setInfoMessage("Not quite. Review the expected answer and continue.");
+  }
+
+  function handleNextQuizWord() {
+    if (!activeQuizCard || !quizResult) {
+      return;
+    }
+
+    if (quizIndex >= quizCards.length - 1) {
+      const totalAnswered = quizAnsweredCount;
+      const totalCorrect = quizCorrectCount;
+      resetQuizState();
+      setInfoMessage(`Quiz complete. Score: ${totalCorrect}/${totalAnswered}.`);
+      return;
+    }
+
+    setQuizIndex((current) => current + 1);
+    setQuizInput("");
+    setQuizResult(null);
+    resetMessages();
   }
 
   function handleFlipGameCard() {
@@ -611,7 +834,7 @@ function App() {
           <div>
             <h1>Spanish → Bulgarian Flash Cards</h1>
             <p className="panel-subtitle">
-              Add vocabulary and draw up to 50 random cards for revision.
+              Add vocabulary and switch between flash cards and two quiz directions.
             </p>
           </div>
           <button type="button" onClick={handleSignOut} className="secondary">
@@ -620,151 +843,273 @@ function App() {
         </header>
 
         <section className="mode-switch-panel">
-          <p className="mode-switch-title">Study direction</p>
+          <p className="mode-switch-title">Practice mode</p>
           <div className="mode-switch-buttons">
             <button
               type="button"
-              className={studyMode === "es_to_bg" ? "tab active" : "tab"}
-              onClick={() => setStudyMode("es_to_bg")}
+              className={practiceMode === "flashcards" ? "tab active" : "tab"}
+              onClick={() => handlePracticeModeChange("flashcards")}
             >
-              Spanish → Bulgarian
+              Flash cards
             </button>
             <button
               type="button"
-              className={studyMode === "bg_to_es" ? "tab active" : "tab"}
-              onClick={() => setStudyMode("bg_to_es")}
+              className={practiceMode === "quiz_bg_to_es" ? "tab active" : "tab"}
+              onClick={() => handlePracticeModeChange("quiz_bg_to_es")}
             >
-              Bulgarian → Spanish
+              Quiz: BG → ES
+            </button>
+            <button
+              type="button"
+              className={practiceMode === "quiz_es_to_bg" ? "tab active" : "tab"}
+              onClick={() => handlePracticeModeChange("quiz_es_to_bg")}
+            >
+              Quiz: ES → BG
             </button>
           </div>
         </section>
 
-        <form onSubmit={handleWordUpload} className="word-form">
-          <label>
-            Spanish word
-            <input
-              type="text"
-              value={spanishWord}
-              onChange={(event) => setSpanishWord(event.target.value)}
-              placeholder="e.g. aprender"
-              required
-            />
-          </label>
-
-          <label>
-            Bulgarian translation
-            <input
-              type="text"
-              value={bulgarianWord}
-              onChange={(event) => setBulgarianWord(event.target.value)}
-              placeholder="e.g. уча"
-              required
-            />
-          </label>
-
-          <button type="submit" disabled={wordBusy}>
-            {wordBusy ? "Saving..." : "Upload word"}
-          </button>
-        </form>
-
-        <section className="bulk-upload-panel">
-          <div className="bulk-upload-header">
-            <h2>Bulk upload (XLSX)</h2>
-            <button type="button" className="secondary" onClick={handleDownloadTemplate}>
-              Download template
-            </button>
-          </div>
-          <p className="bulk-upload-hint">
-            Use an XLSX file with headers <code>spanish</code> and <code>bulgarian</code> in row 1.
-          </p>
-          <label>
-            Upload XLSX file
-            <input
-              type="file"
-              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              onChange={handleBulkFileChange}
-              disabled={bulkBusy}
-            />
-          </label>
-          {bulkBusy ? <p className="bulk-upload-status">Processing {bulkFileName}...</p> : null}
-        </section>
-
-        <div className="cards-toolbar">
-          <h2>Flash cards</h2>
-          <button type="button" onClick={handleDrawCards} disabled={drawBusy}>
-            {drawBusy ? "Drawing..." : "Draw random 50"}
+        <div className="upload-dialog-trigger">
+          <button type="button" onClick={openUploadDialog}>
+            Upload words
           </button>
         </div>
 
-        <div className="cards-grid">
-          {cards.map((card, index) => {
-            const isRevealed = revealedCards[card.id];
-
-            return (
-              <button
-                type="button"
-                key={`${card.id}-${index}`}
-                className={isRevealed ? "card revealed" : "card"}
-                onClick={() => toggleCard(card.id)}
-                style={{ animationDelay: `${(index % 10) * 40}ms` }}
-              >
-                <span className="card-label">
-                  {isRevealed ? answerLabel(studyMode) : questionLabel(studyMode)}
-                </span>
-                <span className="card-value">
-                  {isRevealed ? answerValue(card, studyMode) : questionValue(card, studyMode)}
-                </span>
-                <span className="card-hint">Tap to flip</span>
+        {practiceMode === "flashcards" ? (
+          <>
+            <div className="cards-toolbar">
+              <h2>Flash cards</h2>
+              <button type="button" onClick={handleDrawCards} disabled={drawBusy}>
+                {drawBusy ? "Drawing..." : "Draw random 50"}
               </button>
-            );
-          })}
-        </div>
+            </div>
 
-        <section className="mini-game-panel">
-          <div className="cards-toolbar mini-game-toolbar">
-            <h2>Mini-game (20 cards)</h2>
-            <button type="button" onClick={handleStartMiniGame} disabled={gameBusy}>
-              {gameBusy ? "Preparing..." : "Start mini-game"}
-            </button>
-          </div>
+            <div className="cards-grid">
+              {cards.map((card, index) => {
+                const isRevealed = revealedCards[card.id];
 
-          {activeGameCard ? (
-            <div className="mini-game-content">
-              <p className="mini-game-progress">
-                Card {gameIndex + 1} of {gameCards.length}
-              </p>
+                return (
+                  <button
+                    type="button"
+                    key={`${card.id}-${index}`}
+                    className={isRevealed ? "card revealed" : "card"}
+                    onClick={() => toggleCard(card.id)}
+                    style={{ animationDelay: `${(index % 10) * 40}ms` }}
+                  >
+                    <span className="card-label">
+                      {isRevealed ? answerLabel(FLASHCARD_MODE) : questionLabel(FLASHCARD_MODE)}
+                    </span>
+                    <span className="card-value">
+                      {isRevealed
+                        ? answerValue(card, FLASHCARD_MODE)
+                        : questionValue(card, FLASHCARD_MODE)}
+                    </span>
+                    <span className="card-hint">Tap to flip</span>
+                  </button>
+                );
+              })}
+            </div>
 
-              <button
-                type="button"
-                className={gameFlipped ? "card revealed mini-game-card" : "card mini-game-card"}
-                onClick={handleFlipGameCard}
-              >
-                <span className="card-label">
-                  {gameFlipped ? answerLabel(studyMode) : questionLabel(studyMode)}
-                </span>
-                <span className="card-value">
-                  {gameFlipped
-                    ? answerValue(activeGameCard, studyMode)
-                    : questionValue(activeGameCard, studyMode)}
-                </span>
-                <span className="card-hint">Tap card to flip</span>
-              </button>
-
-              <div className="mini-game-actions">
-                <button type="button" onClick={handleNextGameCard}>
-                  {gameIndex >= gameCards.length - 1 ? "Finish" : "Next"}
+            <section className="mini-game-panel">
+              <div className="cards-toolbar mini-game-toolbar">
+                <h2>Mini-game (20 cards)</h2>
+                <button type="button" onClick={handleStartMiniGame} disabled={gameBusy}>
+                  {gameBusy ? "Preparing..." : "Start mini-game"}
                 </button>
               </div>
-            </div>
-          ) : (
-            <p className="mini-game-empty">
-              Start the mini-game to draw 20 random words, flip each card, and move to the next one.
-            </p>
-          )}
-        </section>
 
-        {errorMessage ? <p className="message error">{errorMessage}</p> : null}
-        {infoMessage ? <p className="message info">{infoMessage}</p> : null}
+              {activeGameCard ? (
+                <div className="mini-game-content">
+                  <p className="mini-game-progress">
+                    Card {gameIndex + 1} of {gameCards.length}
+                  </p>
+
+                  <button
+                    type="button"
+                    className={gameFlipped ? "card revealed mini-game-card" : "card mini-game-card"}
+                    onClick={handleFlipGameCard}
+                  >
+                    <span className="card-label">
+                      {gameFlipped ? answerLabel(FLASHCARD_MODE) : questionLabel(FLASHCARD_MODE)}
+                    </span>
+                    <span className="card-value">
+                      {gameFlipped
+                        ? answerValue(activeGameCard, FLASHCARD_MODE)
+                        : questionValue(activeGameCard, FLASHCARD_MODE)}
+                    </span>
+                    <span className="card-hint">Tap card to flip</span>
+                  </button>
+
+                  <div className="mini-game-actions">
+                    <button type="button" onClick={handleNextGameCard}>
+                      {gameIndex >= gameCards.length - 1 ? "Finish" : "Next"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <p className="mini-game-empty">
+                  Start the mini-game to draw 20 random words, flip each card, and move to the next one.
+                </p>
+              )}
+            </section>
+          </>
+        ) : (
+          <section className="quiz-panel">
+            <div className="cards-toolbar quiz-toolbar">
+              <h2>
+                {practiceMode === "quiz_bg_to_es"
+                  ? "Word quiz: Bulgarian → Spanish"
+                  : "Word quiz: Spanish → Bulgarian"}
+              </h2>
+              <button type="button" onClick={handleStartQuiz} disabled={quizBusy}>
+                {quizBusy ? "Preparing..." : "Start quiz (20 words)"}
+              </button>
+            </div>
+
+            {activeQuizCard ? (
+              <div className="quiz-content">
+                <p className="mini-game-progress">
+                  Word {quizIndex + 1} of {quizCards.length}
+                </p>
+                <p className="quiz-prompt-label">{quizPromptLabel(practiceMode)}</p>
+                <p className="quiz-prompt-value">{quizPromptValue(activeQuizCard, practiceMode)}</p>
+
+                <form onSubmit={handleSubmitQuizAnswer} className="quiz-form">
+                  <label>
+                    {quizExpectedLabel(practiceMode)}
+                    <input
+                      type="text"
+                      value={quizInput}
+                      onChange={(event) => setQuizInput(event.target.value)}
+                      placeholder="Type your answer"
+                      disabled={Boolean(quizResult)}
+                      required
+                    />
+                  </label>
+
+                  <div className="quiz-actions">
+                    <button
+                      type="submit"
+                      disabled={quizBusy || Boolean(quizResult) || !quizInput.trim()}
+                    >
+                      Check answer
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={handleNextQuizWord}
+                      disabled={!quizResult}
+                    >
+                      {quizIndex >= quizCards.length - 1 ? "Finish quiz" : "Next word"}
+                    </button>
+                  </div>
+                </form>
+
+                {quizResult ? (
+                  <p
+                    className={
+                      quizResult.status === "exact"
+                        ? "quiz-result correct"
+                        : quizResult.status === "warning"
+                          ? "quiz-result warning"
+                          : "quiz-result wrong"
+                    }
+                  >
+                    {quizResult.status === "exact"
+                      ? "Correct."
+                      : quizResult.status === "warning"
+                        ? `Correct, but be careful with accent or case. Correct word: ${quizResult.expected}`
+                        : `Incorrect. Expected: ${quizResult.expected}`}
+                  </p>
+                ) : null}
+
+                <p className="quiz-score">
+                  Score: {quizCorrectCount}/{quizAnsweredCount}
+                </p>
+              </div>
+            ) : (
+              <p className="quiz-empty">
+                Start the quiz to draw 20 random words and answer them one by one.
+              </p>
+            )}
+          </section>
+        )}
+
+        {isUploadDialogOpen ? (
+          <div className="upload-dialog-backdrop" onClick={closeUploadDialog}>
+            <section
+              className="upload-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Upload words"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="upload-dialog-header">
+                <button type="button" className="secondary upload-dialog-close" onClick={closeUploadDialog}>
+                  Close
+                </button>
+              </div>
+
+              <h2>Upload words</h2>
+
+              <form onSubmit={handleWordUpload} className="word-form">
+                <label>
+                  Spanish word
+                  <input
+                    type="text"
+                    value={spanishWord}
+                    onChange={(event) => setSpanishWord(event.target.value)}
+                    placeholder="e.g. aprender"
+                    required
+                  />
+                </label>
+
+                <label>
+                  Bulgarian translation
+                  <input
+                    type="text"
+                    value={bulgarianWord}
+                    onChange={(event) => setBulgarianWord(event.target.value)}
+                    placeholder="e.g. уча"
+                    required
+                  />
+                </label>
+
+                <button type="submit" disabled={wordBusy}>
+                  {wordBusy ? "Saving..." : "Upload word"}
+                </button>
+              </form>
+
+              <section className="bulk-upload-panel">
+                <div className="bulk-upload-header">
+                  <h2>Bulk upload (XLSX)</h2>
+                  <button type="button" className="secondary" onClick={handleDownloadTemplate}>
+                    Download template
+                  </button>
+                </div>
+                <p className="bulk-upload-hint">
+                  Use an XLSX file with headers <code>spanish</code> and <code>bulgarian</code> in row 1.
+                </p>
+                <label>
+                  Upload XLSX file
+                  <input
+                    type="file"
+                    accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    onChange={handleBulkFileChange}
+                    disabled={bulkBusy}
+                  />
+                </label>
+                {bulkBusy ? <p className="bulk-upload-status">Processing {bulkFileName}...</p> : null}
+              </section>
+
+              {errorMessage ? <p className="message error">{errorMessage}</p> : null}
+              {infoMessage ? <p className="message info">{infoMessage}</p> : null}
+            </section>
+          </div>
+        ) : null}
+
+        {!isUploadDialogOpen && errorMessage ? <p className="message error">{errorMessage}</p> : null}
+        {!isUploadDialogOpen && infoMessage ? <p className="message info">{infoMessage}</p> : null}
       </section>
     </main>
   );

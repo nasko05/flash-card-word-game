@@ -5,11 +5,10 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
 from common import (
-    RANDOM_POOL,
     generate_rand_key,
     json_response,
     parse_json_body,
-    read_user_claims,
+    read_user_id,
     to_clean_string,
 )
 
@@ -39,12 +38,15 @@ def lambda_handler(event, _context):
                 {"message": "Each field must be 120 characters or fewer."}
             )
 
-        claims = read_user_claims(event)
+        user_id = read_user_id(event)
+        if not user_id:
+            return json_response(401, {"message": "Unauthorized."})
+
         table = dynamodb.Table(WORDS_TABLE)
         word_id = spanish.lower()
 
         table.update_item(
-            Key={"wordId": word_id},
+            Key={"userId": user_id, "wordId": word_id},
             UpdateExpression=(
                 "SET spanish = :spanish, bulgarian = :bulgarian, updatedAt = :updated_at, "
                 "createdBy = :created_by, randomPool = if_not_exists(randomPool, :random_pool), "
@@ -54,8 +56,8 @@ def lambda_handler(event, _context):
                 ":spanish": spanish,
                 ":bulgarian": bulgarian,
                 ":updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                ":created_by": claims.get("sub", "unknown"),
-                ":random_pool": RANDOM_POOL,
+                ":created_by": user_id,
+                ":random_pool": user_id,
                 ":rand_key": generate_rand_key(),
             },
         )

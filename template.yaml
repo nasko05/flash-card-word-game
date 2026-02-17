@@ -27,6 +27,8 @@ Resources:
     Properties:
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
+        - AttributeName: userId
+          AttributeType: S
         - AttributeName: wordId
           AttributeType: S
         - AttributeName: randomPool
@@ -34,8 +36,10 @@ Resources:
         - AttributeName: randKey
           AttributeType: N
       KeySchema:
-        - AttributeName: wordId
+        - AttributeName: userId
           KeyType: HASH
+        - AttributeName: wordId
+          KeyType: RANGE
       GlobalSecondaryIndexes:
         - IndexName: RandomPoolRandKeyIndex
           KeySchema:
