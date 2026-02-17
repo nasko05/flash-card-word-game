@@ -115,5 +115,5 @@ Open `http://localhost:5173`.
 - Bulk upload is supported via XLSX in the UI (download template, fill rows, upload file).
 - You can export all words for the authenticated user as XLSX, edit them, and upload back in bulk.
 - Quiz answer checks are case-insensitive; near-miss answers (accent/case only) are counted as correct with a warning and the canonical word shown.
-- Quiz mode `Bulgarian -> Spanish` ignores `e`/`i` accents when checking typed Spanish answers while keeping `ñ` strict.
+- Quiz mode `Bulgarian -> Spanish` ignores vowel accents when checking typed Spanish answers while keeping `ñ` strict.
 - Random draw is user-scoped and uses indexed query by `randKey` in normal operation.

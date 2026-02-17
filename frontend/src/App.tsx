@@ -42,6 +42,7 @@ type ExportWordsResponse = {
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") || "";
 const FLASHCARD_MODE: StudyMode = "es_to_bg";
 const COMBINING_MARK_REGEX = /[\u0300-\u036f]/;
+const SPANISH_VOWELS = new Set(["a", "e", "i", "o", "u"]);
 
 function questionLabel(mode: StudyMode) {
   return mode === "es_to_bg" ? "Spanish" : "Bulgarian";
@@ -90,7 +91,7 @@ function normalizeSpanishQuizAnswer(value: string) {
 
   for (const char of normalized) {
     if (COMBINING_MARK_REGEX.test(char)) {
-      if (previousBaseChar === "e" || previousBaseChar === "i") {
+      if (SPANISH_VOWELS.has(previousBaseChar)) {
         continue;
       }
 
