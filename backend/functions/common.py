@@ -1,5 +1,6 @@
 import json
 import random
+from decimal import Decimal
 from typing import Any, Dict
 
 RAND_KEY_MIN = 1
@@ -7,12 +8,19 @@ RAND_KEY_MAX = 1_000_000_000
 
 
 def json_response(status_code: int, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def _json_default(value: Any):
+        if isinstance(value, Decimal):
+            if value == value.to_integral_value():
+                return int(value)
+            return float(value)
+        raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
     return {
         "statusCode": status_code,
         "headers": {
             "Content-Type": "application/json"
         },
-        "body": json.dumps(payload)
+        "body": json.dumps(payload, default=_json_default)
     }
 
 

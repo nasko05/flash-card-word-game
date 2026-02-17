@@ -17,10 +17,24 @@ type FlashCard = {
 };
 
 type StudyMode = "es_to_bg" | "bg_to_es";
-type PracticeMode = "flashcards" | "quiz_bg_to_es" | "quiz_es_to_bg";
+type PracticeMode = "flashcards" | "quiz_bg_to_es" | "quiz_es_to_bg" | "sentence_bg_to_es";
 type QuizResult = {
   status: "exact" | "warning" | "wrong";
   expected: string;
+};
+
+type SentenceResult = {
+  status: "exact" | "warning" | "wrong";
+  canonicalAnswer: string;
+};
+
+type SentenceExercise = {
+  id: string;
+  promptBulgarian: string;
+  personKey?: string;
+  domain?: string;
+  difficulty?: number;
+  tense?: string;
 };
 
 type BulkUploadError = {
@@ -37,6 +51,18 @@ type BulkUploadResponse = {
 type ExportWordsResponse = {
   count: number;
   items: FlashCard[];
+};
+
+type SentenceNextResponse = {
+  item?: SentenceExercise;
+  message?: string;
+};
+
+type SentenceCheckResponse = {
+  status: "exact" | "warning" | "wrong";
+  isCorrect: boolean;
+  message: string;
+  canonicalAnswer: string;
 };
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") || "";
@@ -299,6 +325,14 @@ function App() {
   const [quizAnsweredCount, setQuizAnsweredCount] = useState(0);
   const [quizBusy, setQuizBusy] = useState(false);
 
+  const [sentenceExercise, setSentenceExercise] = useState<SentenceExercise | null>(null);
+  const [sentenceInput, setSentenceInput] = useState("");
+  const [sentenceResult, setSentenceResult] = useState<SentenceResult | null>(null);
+  const [sentenceAnsweredCount, setSentenceAnsweredCount] = useState(0);
+  const [sentenceCorrectCount, setSentenceCorrectCount] = useState(0);
+  const [sentenceBusy, setSentenceBusy] = useState(false);
+  const [sentenceCheckBusy, setSentenceCheckBusy] = useState(false);
+
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
 
@@ -379,10 +413,19 @@ function App() {
     setQuizAnsweredCount(0);
   }
 
+  function resetSentenceState() {
+    setSentenceExercise(null);
+    setSentenceInput("");
+    setSentenceResult(null);
+    setSentenceAnsweredCount(0);
+    setSentenceCorrectCount(0);
+  }
+
   function handlePracticeModeChange(mode: PracticeMode) {
     resetMessages();
     setPracticeMode(mode);
     resetQuizState();
+    resetSentenceState();
   }
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
@@ -479,6 +522,7 @@ function App() {
       setGameFlipped(false);
       setPracticeMode("flashcards");
       resetQuizState();
+      resetSentenceState();
       setInfoMessage("Logged out.");
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
@@ -729,6 +773,96 @@ function App() {
     resetMessages();
   }
 
+  async function fetchNextSentenceExercise() {
+    const result = (await apiRequest("/sentences/next")) as SentenceNextResponse;
+    const item = result?.item || null;
+
+    if (!item) {
+      setSentenceExercise(null);
+      setInfoMessage(result?.message || "No sentence exercises are available yet.");
+      return false;
+    }
+
+    setSentenceExercise(item);
+    setSentenceInput("");
+    setSentenceResult(null);
+    return true;
+  }
+
+  async function handleStartSentenceExercise() {
+    resetMessages();
+    setSentenceBusy(true);
+
+    try {
+      setSentenceAnsweredCount(0);
+      setSentenceCorrectCount(0);
+      const loaded = await fetchNextSentenceExercise();
+      if (loaded) {
+        setInfoMessage("Sentence practice started.");
+      }
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
+      setSentenceBusy(false);
+    }
+  }
+
+  async function handleCheckSentenceAnswer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    resetMessages();
+
+    if (!sentenceExercise || sentenceResult) {
+      return;
+    }
+
+    const answer = sentenceInput.trim();
+    if (!answer) {
+      setErrorMessage("Enter a full Spanish sentence before checking.");
+      return;
+    }
+
+    setSentenceCheckBusy(true);
+    try {
+      const result = (await apiRequest("/sentences/check", {
+        method: "POST",
+        body: JSON.stringify({
+          sentenceId: sentenceExercise.id,
+          answer
+        })
+      })) as SentenceCheckResponse;
+
+      setSentenceResult({
+        status: result.status,
+        canonicalAnswer: result.canonicalAnswer
+      });
+      setSentenceAnsweredCount((current) => current + 1);
+      if (result.isCorrect) {
+        setSentenceCorrectCount((current) => current + 1);
+      }
+      setInfoMessage(result.message);
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
+      setSentenceCheckBusy(false);
+    }
+  }
+
+  async function handleNextSentenceExercise() {
+    if (!sentenceExercise) {
+      return;
+    }
+
+    resetMessages();
+    setSentenceBusy(true);
+    try {
+      await fetchNextSentenceExercise();
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    } finally {
+      setSentenceBusy(false);
+    }
+  }
+
   function handleFlipGameCard() {
     if (!activeGameCard) {
       return;
@@ -872,7 +1006,7 @@ function App() {
           <div>
             <h1>Spanish Practice</h1>
             <p className="panel-subtitle">
-              Add vocabulary and practice with flash cards and two quiz directions.
+              Add vocabulary and practice with flash cards, word quizzes, and sentence translation.
             </p>
           </div>
           <button type="button" onClick={handleSignOut} className="secondary">
@@ -903,6 +1037,13 @@ function App() {
               onClick={() => handlePracticeModeChange("quiz_es_to_bg")}
             >
               Quiz: ES → BG
+            </button>
+            <button
+              type="button"
+              className={practiceMode === "sentence_bg_to_es" ? "tab active" : "tab"}
+              onClick={() => handlePracticeModeChange("sentence_bg_to_es")}
+            >
+              Sentences: BG → ES
             </button>
           </div>
         </section>
@@ -994,6 +1135,85 @@ function App() {
               )}
             </section>
           </>
+        ) : practiceMode === "sentence_bg_to_es" ? (
+          <section className="quiz-panel">
+            <div className="cards-toolbar quiz-toolbar">
+              <h2>Sentence practice: Bulgarian → Spanish</h2>
+              <button type="button" onClick={handleStartSentenceExercise} disabled={sentenceBusy}>
+                {sentenceBusy ? "Preparing..." : "Start sentence practice"}
+              </button>
+            </div>
+
+            {sentenceExercise ? (
+              <div className="quiz-content">
+                <p className="mini-game-progress">Translate this sentence into Spanish</p>
+                <p className="quiz-prompt-label">BULGARIAN SENTENCE</p>
+                <p className="quiz-prompt-value">{sentenceExercise.promptBulgarian}</p>
+
+                <form onSubmit={handleCheckSentenceAnswer} className="quiz-form">
+                  <label>
+                    Spanish translation
+                    <input
+                      type="text"
+                      value={sentenceInput}
+                      onChange={(event) => setSentenceInput(event.target.value)}
+                      placeholder="Type the full sentence in Spanish"
+                      disabled={Boolean(sentenceResult) || sentenceCheckBusy}
+                      required
+                    />
+                  </label>
+
+                  <div className="quiz-actions">
+                    <button
+                      type="submit"
+                      disabled={
+                        sentenceBusy ||
+                        sentenceCheckBusy ||
+                        Boolean(sentenceResult) ||
+                        !sentenceInput.trim()
+                      }
+                    >
+                      {sentenceCheckBusy ? "Checking..." : "Check sentence"}
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={handleNextSentenceExercise}
+                      disabled={sentenceBusy || !sentenceResult}
+                    >
+                      Next sentence
+                    </button>
+                  </div>
+                </form>
+
+                {sentenceResult ? (
+                  <p
+                    className={
+                      sentenceResult.status === "exact"
+                        ? "quiz-result correct"
+                        : sentenceResult.status === "warning"
+                          ? "quiz-result warning"
+                          : "quiz-result wrong"
+                    }
+                  >
+                    {sentenceResult.status === "exact"
+                      ? "Correct."
+                      : sentenceResult.status === "warning"
+                        ? `Correct, but be careful with accent or case. Canonical: ${sentenceResult.canonicalAnswer}`
+                        : `Incorrect. Canonical: ${sentenceResult.canonicalAnswer}`}
+                  </p>
+                ) : null}
+
+                <p className="quiz-score">
+                  Score: {sentenceCorrectCount}/{sentenceAnsweredCount}
+                </p>
+              </div>
+            ) : (
+              <p className="quiz-empty">
+                Start sentence practice to get natural day-to-day Bulgarian prompts.
+              </p>
+            )}
+          </section>
         ) : (
           <section className="quiz-panel">
             <div className="cards-toolbar quiz-toolbar">

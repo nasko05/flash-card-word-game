@@ -10,6 +10,7 @@ ALLOWED_ORIGIN="*"
 AWS_REGION="eu-central-1"
 AWS_PROFILE_NAME="adonev-login"
 SKIP_FRONTEND_DEPLOY="false"
+SEED_SENTENCES="false"
 
 usage() {
   cat <<USAGE
@@ -28,6 +29,7 @@ Options:
   --stage-name <stage>      API stage name
   --allowed-origin <url>    CORS origin for API
   --profile <name>          AWS profile override (default: adonev-login)
+  --seed-sentences          Generate and publish sentence exercises after backend deploy
   --skip-frontend           Deploy backend only (skip S3/CloudFront frontend publish)
   --help                    Show this help
 USAGE
@@ -50,6 +52,10 @@ while [[ $# -gt 0 ]]; do
     --profile)
       AWS_PROFILE_NAME="$2"
       shift 2
+      ;;
+    --seed-sentences)
+      SEED_SENTENCES="true"
+      shift
       ;;
     --skip-frontend)
       SKIP_FRONTEND_DEPLOY="true"
@@ -143,6 +149,19 @@ sam deploy \
     AllowedOrigin="${ALLOWED_ORIGIN}"
 
 "${SCRIPT_DIR}/generate-frontend-env.sh" "${STACK_NAME}" "${AWS_REGION}" "${AWS_PROFILE_NAME}"
+
+if [[ "${SEED_SENTENCES}" == "true" ]]; then
+  SENTENCE_POOL_FILE=$(mktemp "/tmp/sentence-pool.XXXXXX.json")
+  echo "Generating sentence pool..."
+  python3 "${SCRIPT_DIR}/generate-sentence-pool.py" --output "${SENTENCE_POOL_FILE}"
+  echo "Publishing sentence pool..."
+  python3 "${SCRIPT_DIR}/publish-sentence-pool.py" \
+    --input "${SENTENCE_POOL_FILE}" \
+    --stack-name "${STACK_NAME}" \
+    --region "${AWS_REGION}" \
+    --profile "${AWS_PROFILE_NAME}"
+  rm -f "${SENTENCE_POOL_FILE}"
+fi
 
 if [[ "${SKIP_FRONTEND_DEPLOY}" == "true" ]]; then
   echo "Backend deployment complete. Frontend deployment skipped (--skip-frontend)."

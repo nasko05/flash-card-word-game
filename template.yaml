@@ -10,6 +10,7 @@ Globals:
     Environment:
       Variables:
         WORDS_TABLE: !Ref WordsTable
+        SENTENCES_TABLE: !Ref SentencesTable
 
 Parameters:
   StageName:
@@ -53,6 +54,32 @@ Resources:
               - wordId
               - spanish
               - bulgarian
+
+  SentencesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: sentenceId
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+        - AttributeName: statusRandKey
+          AttributeType: N
+      KeySchema:
+        - AttributeName: sentenceId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: StatusRandKeyIndex
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: statusRandKey
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
 
   UserPool:
     Type: AWS::Cognito::UserPool
@@ -241,6 +268,44 @@ Resources:
             Method: GET
             Path: /words/random
 
+  GetNextSentenceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/functions/
+      Handler: get_next_sentence.lambda_handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref SentencesTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - !Sub "${SentencesTable.Arn}/index/StatusRandKeyIndex"
+      Events:
+        NextSentence:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: GET
+            Path: /sentences/next
+
+  CheckSentenceAnswerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/functions/
+      Handler: check_sentence_answer.lambda_handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref SentencesTable
+      Events:
+        CheckSentence:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Method: POST
+            Path: /sentences/check
+
   GetUserWordsFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -300,6 +365,9 @@ Outputs:
   WordsTableName:
     Description: DynamoDB table storing Spanish/Bulgarian words
     Value: !Ref WordsTable
+  SentencesTableName:
+    Description: DynamoDB table storing sentence translation exercises
+    Value: !Ref SentencesTable
   FrontendBucketName:
     Description: S3 bucket for static frontend hosting
     Value: !Ref FrontendBucket
